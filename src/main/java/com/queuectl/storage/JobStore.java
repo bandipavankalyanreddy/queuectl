@@ -55,8 +55,17 @@ public final class JobStore {
         }
     }
     public void reapExpired(long now) throws SQLException {
-        try (Connection c = database.connect(); PreparedStatement q = c.prepareStatement("SELECT id,attempts,max_retries FROM jobs WHERE state='processing' AND lease_expires_at < ?")) {
-            q.setLong(1,now); try (ResultSet r=q.executeQuery()) { while(r.next()) fail(r.getString(1),r.getInt(2)+1,r.getInt(3),now); }
+        int base = configInt("backoff-base");
+        /* This single UPDATE finds expired leases and applies normal failure/DLQ accounting. */
+        String sql = """
+                UPDATE jobs SET state=CASE WHEN attempts+1 > max_retries THEN 'dead' ELSE 'failed' END,
+                  attempts=attempts+1,
+                  next_retry_at=CASE WHEN attempts+1 > max_retries THEN NULL
+                    ELSE ? + CAST(POWER(?, attempts + 1) * 1000 AS INTEGER) END,
+                  updated_at=?, claimed_by=NULL, lease_expires_at=NULL
+                WHERE state='processing' AND lease_expires_at < ?""";
+        try (Connection c = database.connect(); PreparedStatement p = c.prepareStatement(sql)) {
+            p.setLong(1, now); p.setInt(2, base); p.setLong(3, now); p.setLong(4, now); p.executeUpdate();
         }
     }
     public void retryDead(String id) throws SQLException { update("UPDATE jobs SET state='pending',attempts=0,next_retry_at=NULL,updated_at=? WHERE id=? AND state='dead'", id); }
