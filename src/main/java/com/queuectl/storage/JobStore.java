@@ -27,21 +27,27 @@ public final class JobStore {
         }
     }
 
-    public Optional<Job> claimNext(String workerId, long leaseExpiresAt, long now) throws SQLException {
+    public Optional<Job> claimNext(String workerId, long leaseExpiresAt, long now, int maxRetries) throws SQLException {
         /* One statement, never SELECT then UPDATE: SQLite serializes writers across processes. */
         String sql = """
-                UPDATE jobs SET state='processing', claimed_by=?, lease_expires_at=?, updated_at=?
+                UPDATE jobs SET state='processing', claimed_by=?, lease_expires_at=?, updated_at=?, max_retries=?
                 WHERE id=(SELECT id FROM jobs WHERE state='pending' OR (state='failed' AND next_retry_at<=?)
                           ORDER BY created_at ASC LIMIT 1)
                   AND state IN ('pending','failed')
                 RETURNING *""";
         try (Connection c = database.connect(); PreparedStatement p = c.prepareStatement(sql)) {
-            p.setString(1, workerId); p.setLong(2, leaseExpiresAt); p.setLong(3, now); p.setLong(4, now);
+            p.setString(1, workerId); p.setLong(2, leaseExpiresAt); p.setLong(3, now); p.setInt(4,maxRetries); p.setLong(5, now);
             try (ResultSet r = p.executeQuery()) { return r.next() ? Optional.of(row(r)) : Optional.empty(); }
         }
     }
 
     public void complete(String id) throws SQLException { update("UPDATE jobs SET state='completed',updated_at=?,claimed_by=NULL,lease_expires_at=NULL WHERE id=?", id); }
+    /** Heartbeat prevents a healthy long-running command from being mistaken for a crash. */
+    public void renewLease(String id, String workerId, long leaseExpiresAt) throws SQLException {
+        try(Connection c=database.connect(); PreparedStatement p=c.prepareStatement("UPDATE jobs SET lease_expires_at=?,updated_at=? WHERE id=? AND state='processing' AND claimed_by=?")) {
+            p.setLong(1,leaseExpiresAt); p.setLong(2,System.currentTimeMillis()); p.setString(3,id); p.setString(4,workerId); p.executeUpdate();
+        }
+    }
     public void fail(String id, int attempts, int maxRetries, long retryAt) throws SQLException {
         String state = attempts > maxRetries ? "dead" : "failed";
         try (Connection c = database.connect(); PreparedStatement p = c.prepareStatement("UPDATE jobs SET state=?,attempts=?,next_retry_at=?,updated_at=?,claimed_by=NULL,lease_expires_at=NULL WHERE id=?")) {
@@ -54,6 +60,7 @@ public final class JobStore {
         }
     }
     public void retryDead(String id) throws SQLException { update("UPDATE jobs SET state='pending',attempts=0,next_retry_at=NULL,updated_at=? WHERE id=? AND state='dead'", id); }
+    public int configInt(String key) throws SQLException { try(Connection c=database.connect();PreparedStatement p=c.prepareStatement("SELECT value FROM config WHERE key=?")){p.setString(1,key);try(ResultSet r=p.executeQuery()){if(!r.next()) throw new IllegalArgumentException("missing config "+key);return Integer.parseInt(r.getString(1));}} }
     public int count(String state) throws SQLException { try(Connection c=database.connect(); PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM jobs WHERE state=?")){p.setString(1,state);try(ResultSet r=p.executeQuery()){r.next();return r.getInt(1);}} }
     private void update(String sql,String id) throws SQLException { try(Connection c=database.connect();PreparedStatement p=c.prepareStatement(sql)){p.setLong(1,System.currentTimeMillis());p.setString(2,id);p.executeUpdate();} }
     private static Job row(ResultSet r) throws SQLException { Long lease=(Long)r.getObject("lease_expires_at"), retry=(Long)r.getObject("next_retry_at"); return new Job(r.getString("id"),r.getString("command"),r.getString("state"),r.getInt("attempts"),r.getInt("max_retries"),r.getLong("created_at"),r.getLong("updated_at"),r.getString("claimed_by"),lease,retry); }
