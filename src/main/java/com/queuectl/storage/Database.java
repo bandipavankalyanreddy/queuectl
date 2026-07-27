@@ -34,7 +34,7 @@ public final class Database {
             s.execute("""
                     CREATE TABLE IF NOT EXISTS jobs (
                       id TEXT PRIMARY KEY, command TEXT NOT NULL, state TEXT NOT NULL,
-                      attempts INTEGER NOT NULL DEFAULT 0, max_retries INTEGER NOT NULL,
+                      attempts INTEGER NOT NULL DEFAULT 0, max_retries INTEGER NOT NULL, backoff_base INTEGER NOT NULL DEFAULT 2,
                       created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
                       claimed_by TEXT, lease_expires_at INTEGER, next_retry_at INTEGER
                     )""");

@@ -35,12 +35,12 @@ public final class WorkerManager {
     private static final class Worker implements Runnable {
         private final String id; private final JobStore store; private volatile boolean shuttingDown;
         Worker(String id,JobStore store){this.id=id;this.store=store;Runtime.getRuntime().addShutdownHook(new Thread(()->shuttingDown=true));}
-        public void run() { long lastReap=0; while(!shuttingDown){try { long now=System.currentTimeMillis(); if(now-lastReap>=REAPER_INTERVAL_MILLIS){store.reapExpired(now);lastReap=now;} int maxRetries=store.configInt("max-retries"); var maybe=store.claimNext(id,now+LEASE_MILLIS,now,maxRetries); if(maybe.isEmpty()){Thread.sleep(150);continue;} execute(maybe.get()); } catch(Exception e){System.err.println("worker "+id+": "+e.getMessage()); try{Thread.sleep(250);}catch(InterruptedException ignored){}}} }
+        public void run() { long lastReap=0; while(!shuttingDown){try { long now=System.currentTimeMillis(); if(now-lastReap>=REAPER_INTERVAL_MILLIS){store.reapExpired(now);lastReap=now;} int maxRetries=store.configInt("max-retries"), base=store.configInt("backoff-base"); var maybe=store.claimNext(id,now+LEASE_MILLIS,now,maxRetries,base); if(maybe.isEmpty()){Thread.sleep(150);continue;} execute(maybe.get()); } catch(Exception e){System.err.println("worker "+id+": "+e.getMessage()); try{Thread.sleep(250);}catch(InterruptedException ignored){}}} }
         private void execute(Job job) throws SQLException { try { Process process=new ProcessBuilder(shellCommand(job.command())).inheritIO().start();
             while (!process.waitFor(2, TimeUnit.SECONDS)) store.renewLease(job.id(), id, System.currentTimeMillis()+LEASE_MILLIS);
             if(process.exitValue()==0)store.complete(job.id()); else failure(job);
         } catch(InterruptedException e){Thread.currentThread().interrupt(); failure(job); } catch(IOException e){failure(job); } }
-        private void failure(Job job) throws SQLException { int attempts=job.attempts()+1; int base=store.configInt("backoff-base"); int max=store.configInt("max-retries"); long delaySeconds=(long)Math.pow(base,attempts); store.fail(job.id(),attempts,max,System.currentTimeMillis()+delaySeconds*1000); }
+        private void failure(Job job) throws SQLException { int attempts=job.attempts()+1; long delaySeconds=(long)Math.pow(job.backoffBase(),attempts); store.fail(job.id(),attempts,job.maxRetries(),System.currentTimeMillis()+delaySeconds*1000); }
         private static String[] shellCommand(String command) { boolean windows=System.getProperty("os.name").toLowerCase().contains("win"); return windows?new String[]{"cmd","/c",command}:new String[]{"sh","-c",command}; }
     }
 }
