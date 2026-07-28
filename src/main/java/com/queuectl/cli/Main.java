@@ -20,6 +20,7 @@ public final class Main {
         if (a.length == 0) { usage(); return; }
         if (a[0].equals("enqueue") && a.length == 2) { enqueue(a[1], store); return; }
         if (a[0].equals("list")) { list(a, store); return; }
+        if (a[0].equals("clear") && a.length == 1) { clear(store); return; }
         if (a[0].equals("status")) { status(store); return; }
         if (a[0].equals("dlq") && a.length >= 2 && a[1].equals("list")) { printJobs(store.list("dead"), false); return; }
         if (a[0].equals("dlq") && a.length == 3 && a[1].equals("retry")) { store.retryDead(a[2]); System.out.println("retried " + a[2]); return; }
@@ -40,6 +41,10 @@ public final class Main {
         printJobs(store.list(state), json);
     }
     private static void status(JobStore s) throws SQLException { for(String state:List.of("pending","processing","failed","completed","dead")) System.out.println(state + ": " + s.count(state)); }
+    private static void clear(JobStore store) throws SQLException {
+        store.clearAll();
+        System.out.println("cleared all jobs");
+    }
     private static void configSet(String key, String value, JobStore store) {
         if (!key.equals("max-retries") && !key.equals("backoff-base")) throw new IllegalArgumentException("unknown config key");
         try { int n=Integer.parseInt(value); if(n<1) throw new IllegalArgumentException("config value must be positive");
@@ -56,5 +61,5 @@ public final class Main {
     private static void printJobs(List<Job> jobs, boolean json) { if(json){System.out.println("["+jobs.stream().map(Main::asJson).reduce((x,y)->x+","+y).orElse("")+"]");}else jobs.forEach(j->System.out.println(j.id()+" "+j.state()+" attempts="+j.attempts()+" command="+j.command())); }
     private static String asJson(Job j) { return "{\"id\":\""+escape(j.id())+"\",\"command\":\""+escape(j.command())+"\",\"state\":\""+j.state()+"\",\"attempts\":"+j.attempts()+",\"max_retries\":"+j.maxRetries()+"}"; }
     private static String escape(String s) { return s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n"); }
-    private static void usage() { System.err.println("usage: queuectl enqueue JSON | worker start --count N | worker stop | status | list --state STATE [--json] | dlq list|retry ID | config set KEY VALUE"); }
+    private static void usage() { System.err.println("usage: queuectl enqueue JSON | worker start --count N | worker stop | status | clear | list --state STATE [--json] | dlq list|retry ID | config set KEY VALUE"); }
 }

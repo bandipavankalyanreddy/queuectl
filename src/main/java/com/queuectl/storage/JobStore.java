@@ -72,6 +72,11 @@ public final class JobStore {
         }
     }
     public void retryDead(String id) throws SQLException { update("UPDATE jobs SET state='pending',attempts=0,next_retry_at=NULL,updated_at=? WHERE id=? AND state='dead'", id); }
+    public void clearAll() throws SQLException {
+        try (Connection c = database.connect(); PreparedStatement p = c.prepareStatement("DELETE FROM jobs")) {
+            p.executeUpdate();
+        }
+    }
     public int configInt(String key) throws SQLException { try(Connection c=database.connect();PreparedStatement p=c.prepareStatement("SELECT value FROM config WHERE key=?")){p.setString(1,key);try(ResultSet r=p.executeQuery()){if(!r.next()) throw new IllegalArgumentException("missing config "+key);return Integer.parseInt(r.getString(1));}} }
     public int count(String state) throws SQLException { try(Connection c=database.connect(); PreparedStatement p=c.prepareStatement("SELECT COUNT(*) FROM jobs WHERE state=?")){p.setString(1,state);try(ResultSet r=p.executeQuery()){r.next();return r.getInt(1);}} }
     private void update(String sql,String id) throws SQLException { try(Connection c=database.connect();PreparedStatement p=c.prepareStatement(sql)){p.setLong(1,System.currentTimeMillis());p.setString(2,id);p.executeUpdate();} }
