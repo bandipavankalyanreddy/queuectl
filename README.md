@@ -3,6 +3,8 @@
 A small, durable CLI job queue for Java 17+. It uses one SQLite file and no framework.
 The only dependency is `sqlite-jdbc`, which provides the embedded SQLite driver.
 
+Reference video: [Google Drive](https://drive.google.com/file/d/1JmEqbhOajmXe6g6hbphbACNRdKXZTG4v/view?usp=drive_link)
+
 ## Run
 
 Install Maven, then build and run from the project directory:
